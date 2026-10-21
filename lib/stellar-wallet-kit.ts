@@ -15,6 +15,7 @@ import {
   WALLET_CONNECT_ID,
 } from "@creit.tech/stellar-wallets-kit/modules/wallet-connect"
 import { albedoImplicitTxAllowed, isAlbedoSelectedInKit } from "@/lib/albedo-intent-client"
+import { albedoRetiredSignMessage, isAlbedoRetired } from "@/lib/albedo-sunset"
 import { getWalletConnectRelayUrl } from "@/lib/walletconnect-resilience"
 import {
   XBULL_ID,
@@ -242,7 +243,9 @@ export async function signTransaction(
   if (typeof window !== "undefined" && isXBullSelected()) {
     try {
       const rawRes = await StellarWalletsKit.signTransaction(xdr, opts)
-      return normalizeXBullSignResult(rawRes)
+      const normalized = normalizeXBullSignResult(rawRes)
+      if (normalized.error) return { error: { message: normalized.error } }
+      return { signedTxXdr: normalized.signedTxXdr, signedTransaction: normalized.signedTransaction }
     } catch (err: unknown) {
       const mapped = mapXBullError(err)
       return { error: { message: mapped.message } }

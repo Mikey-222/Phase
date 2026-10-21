@@ -824,3 +824,27 @@ Flag: `phase-181` (`NEXT_PUBLIC_FEATURE_PHASE_181` / `FEATURE_PHASE_181`). Defau
 - `GET /api/cron/anomaly-detect`: hourly at minute 5, `validateCronAuth` + preview fence + restore marker, then `collectAnomalySample` (volume SQL, counter snapshot, latest distributor health balances) → `detectAnomalies` → persist → route alerts → respond with findings.
 - Counters: `anomaly_checks_run`, `anomaly_volume_breaches`, `anomaly_counter_breaches`, `anomaly_balance_breaches`, `anomaly_alerts_routed`.
 - Not covered: per-channel alert thresholds, alert suppression windows beyond the webhook dedup, and a volume baseline warmer than one value per run.
+
+## 28. Liquidity pools: classic PHASELQ/XLM and Soroswap (spike 574)
+
+Flag: `phase-182` (`NEXT_PUBLIC_FEATURE_PHASE_182` / `FEATURE_PHASE_182`). Default off. See `docs/spikes/574-liquidity-pools-findings.md`.
+
+**Why two venues, not one.** Soroswap is a router contract (its own share token, its own quotes, its own failure modes). The classic DEX is `liquidity_pool_*` operations with shares represented as a `liquidity_pool_shares` trustline and reserves read from Horizon. Treating them as one "pool" is how a build silently sends a classic pool id to a router. `lib/liquidity-pool.ts` keeps one quote shape (`PoolQuote`) but separate builders (`buildClassicPool*` vs `buildSoroswapSwapXdr`).
+
+**Identity.** `classicPoolIdForAssets` sorts with `Asset.compare` (native < alphanum4 < alphanum12, then code, then issuer) and computes the id locally. The SDK rejects unsorted pairs; string sorting puts `PHASELQ` before `native` and produces an invalid id. A caller-supplied id is never trusted for a deposit: the route recomputes it from the pair.
+
+**Quotes.** Constant product, 30 bps taken from the input side. `spotPrice = reserveOut/reserveIn`; `executionPrice = amountOut/amountIn`; `priceImpactBps` is the difference. `minOutStroops` applies the user's slippage. Every quote carries a sha256 `quoteHash` over venue/pool/assets/size/out/min-out/ledger/expiry, and `assertQuoteUsable` returns `409 QUOTE_STALE` for `stale`, expired, or `If-Match`/`quote_hash` mismatch. There is no signed quote: the binding is short TTL (20 s) + hash + explicit min-out.
+
+**Write taxonomy.** `400` invalid input / asset mismatch, `404` flag off or pool missing, `409` stale quote / slippage / intent conflict, `412` missing trustlines (with `Retry-After: 2` and the exact `required_trustlines` array), `422` price impact above 500 bps, `429` per-wallet limiter with `Retry-After`, `503` Horizon/Soroswap unavailable. `poolErrorResponse` is the single mapping used by the route.
+
+**Trustlines.** For PHASELQ/XLM a wallet needs **two** lines: PHASELQ and pool shares. XLM is native. A credit/credit pool needs three. `poolTrustlineStatusFromAccount` returns the exact missing slots; the previous single-asset check reported the wrong one. `buildPoolShareTrustlineXdr` signs a `changeTrust` for `LiquidityPoolAsset`, not for either underlying asset.
+
+**Idempotency.** `recordPoolIntent` keys `WALLET:intent_id` and compares action/venue/pool/quote/size/shares/XDR hash. Same payload is a replay (`replayed: true`), different payload is `409 INTENT_CONFLICT`. The store holds hashes and stroops only, expires after 8 minutes, and never stores a signed XDR. It uses the sidecar lock (§5.4), so it is single-instance safe and diverges across serverless instances — the retry still converges because the signed XDR hash is the comparison key.
+
+**Resilience.** `getClassicPoolSnapshot` caches reserves for 5 s. On Horizon failure it serves a cached snapshot up to 60 s with `stale: true` and increments `lp_reserve_stale_on_error`; a write path then refuses with `409 QUOTE_STALE` instead of signing against unknown reserves. Market display degrades to no conversion. Soroswap config has **no default router**: `SOROSWAP_ROUTER_CONTRACT_ID` is required, validated as a C… StrKey, and compared with optional `SOROSWAP_EXPECTED_ROUTER_ID`; a mismatch returns `503 SOROSWAP_ROUTER_DRIFT` and increments `lp_router_address_drift`.
+
+**Wash.** Self-swap (wallet is both sides, or swaps against a pool it deposited into within 1 h) and self-provision (wallet holds ≥ 90% of shares and is the only swapper) are flagged, not blocked. `recordPoolActivity` stores the flag; `getPoolVolumeExcludingWash` excludes it. Activity ids are caller-supplied (`swap:<txHash>`), so a retried record cannot double-count. The route only records a swap after Horizon confirms `successful: true` and the tx source matches the wallet.
+
+**Seed capital.** `distributor_ledger.pool_seed_stroops` is additive (default 0). `availableBalance` and `reserveFunds` subtract balance − reserve − fee reserve − pool seed − pending holds. Seed capital is visible on-chain but never spendable by refill or settlement. `scripts/distributor-trust-and-payment.ts` adds the pool-share trustline when `LP_POOL_SEED_ENABLED=1`.
+
+**Contract.** `phase-protocol` gains `set_pool_leg` / `get_pool_leg` / `clear_pool_leg` (admin-only, non-zero pool id) and a `PoolLegConfig` storage entry. `settle` is intentionally unchanged: a Soroban contract cannot emit classic DEX operations, so the pool leg is a treasury-signed path payment that reads this config off-chain.

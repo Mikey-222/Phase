@@ -54,12 +54,12 @@ const FILES = {
   searchQueryLog: "search-query-log.json",
   costBudgets: "cost-budgets.json",
   forgeBilling: "forge-billing.json",
-  legalHolds: "legal-holds.json",
-  termsConsents: "terms-consents.json",
-  legalDocuments: "legal-documents.json",
   leaderboardEntries: "leaderboard-entries.json",
   gdprErasureLog: "gdpr-erasure-log.json",
   anomalyBaselines: "anomaly-baselines.json",
+  featureFlagOps: "feature-flag-ops.json",
+  referralQuests: "referral-quests.json",
+  liquidityPoolIntents: "liquidity-pool-intents.json",
 } as const
 
 

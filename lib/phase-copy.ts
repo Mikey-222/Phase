@@ -302,6 +302,38 @@ export const phaseCopy: Record<
   AppLang,
   {
     integrations: IntegrationCopy
+    /** Spike 574 (phase-182): classic PHASELQ/XLM pool + Soroswap surface. */
+    liquidityPools: Record<
+      | "title"
+      | "subtitle"
+      | "spotPrice"
+      | "executionPrice"
+      | "priceImpact"
+      | "minReceived"
+      | "quoteExpires"
+      | "poolReserves"
+      | "totalShares"
+      | "deposit"
+      | "withdraw"
+      | "swap"
+      | "addTrustline"
+      | "trustlineRequired"
+      | "shareTrustlineRequired"
+      | "slippage"
+      | "thinPoolWarning"
+      | "quoteStale"
+      | "retryQuote"
+      | "depositSuccess"
+      | "withdrawSuccess"
+      | "swapSuccess"
+      | "poolDisabled"
+      | "soroswapNotConfigured"
+      | "routerDrift"
+      | "selfProvisionFlagged"
+      | "volumeExcluded"
+      | "rollback",
+      string
+    >
     nav: { home: string; market: string; forge: string; chamber: string; lang: string }
     dashboard: {
       title: string
@@ -791,9 +823,41 @@ export const phaseCopy: Record<
     walletConnectResilience: Record<"title" | "reconnectPrompt" | "chainMismatch" | "openMobileWallet" | "relayDisconnected" | "reconnectedToast", string>
     xbullParity: Record<"badge" | "signPrompt" | "trustlinePrompt" | "rejected" | "networkMismatch", string>
     ledgerClearSigning: Record<"title" | "description" | "targetContract" | "hostFunction" | "verificationCode" | "matchCodePrompt" | "acknowledgePrompt" | "approveButton" | "cancelButton" | "blindSigningDisabled" | "gate13RiskAlert", string>
+    featureFlagOps: Record<"title" | "killSwitchActive" | "rolloutLabel" | "drillPassed" | "versionConflict", string>
+    dependencyCadence: Record<"title" | "sdkAligned" | "skewDetected" | "bytecodeGateBlocked", string>
   }
 > = {
   en: {
+    liquidityPools: {
+      title: "Liquidity pools",
+      subtitle: "Provide PHASELQ and XLM, or swap between them through the classic pool.",
+      spotPrice: "Spot price",
+      executionPrice: "Execution price",
+      priceImpact: "Price impact",
+      minReceived: "Minimum received",
+      quoteExpires: "Quote expires in {seconds}s",
+      poolReserves: "Pool reserves",
+      totalShares: "Pool shares",
+      deposit: "Deposit liquidity",
+      withdraw: "Withdraw liquidity",
+      swap: "Swap",
+      addTrustline: "Add pool trustline",
+      trustlineRequired: "This wallet needs both asset trustlines before depositing.",
+      shareTrustlineRequired: "This wallet needs a pool-share trustline before withdrawing.",
+      slippage: "Slippage tolerance",
+      thinPoolWarning: "The pool is thin: this size moves the price {bps} bps. The quote, not the spot price, is what you would get.",
+      quoteStale: "Reserves changed or this quote expired. Review the new bound before signing.",
+      retryQuote: "Refresh quote",
+      depositSuccess: "Liquidity added. Pool shares are a separate balance from your PHASELQ.",
+      withdrawSuccess: "Shares redeemed. Both assets return in pool proportion.",
+      swapSuccess: "Swap submitted with your minimum received enforced.",
+      poolDisabled: "Liquidity pools are disabled on this deployment.",
+      soroswapNotConfigured: "Soroswap routing is not configured on this network.",
+      routerDrift: "The Soroswap router changed since it was pinned. Routing is paused until an operator updates it.",
+      selfProvisionFlagged: "This pool is seeded and traded by a single wallet, so its volume is excluded from rankings.",
+      volumeExcluded: "Wash-flagged pool volume is excluded from every aggregate.",
+      rollback: "Rollback: turn phase-182 off and restart; pool data stays inert.",
+    },
     integrations: {
       "actionFailed": "The request failed. Your input is preserved; retry when ready.",
       "actionConflict": "This request is already pending or its state has changed. Refresh the status before retrying.",
@@ -1520,6 +1584,36 @@ export const phaseCopy: Record<
 
 
   es: {
+    liquidityPools: {
+      title: "Pools de liquidez",
+      subtitle: "Aportá PHASELQ y XLM, o cambiá entre ambos por el pool clásico.",
+      spotPrice: "Precio spot",
+      executionPrice: "Precio de ejecución",
+      priceImpact: "Impacto en el precio",
+      minReceived: "Mínimo a recibir",
+      quoteExpires: "La cotización vence en {seconds}s",
+      poolReserves: "Reservas del pool",
+      totalShares: "Participaciones del pool",
+      deposit: "Depositar liquidez",
+      withdraw: "Retirar liquidez",
+      swap: "Cambiar",
+      addTrustline: "Agregar trustline del pool",
+      trustlineRequired: "Esta billetera necesita las trustlines de ambos activos antes de depositar.",
+      shareTrustlineRequired: "Esta billetera necesita la trustline de participaciones antes de retirar.",
+      slippage: "Tolerancia de slippage",
+      thinPoolWarning: "El pool es delgado: este tamaño mueve el precio {bps} bps. Lo que recibirías es el precio de ejecución, no el spot.",
+      quoteStale: "Cambiaron las reservas o venció la cotización. Revisá el nuevo límite antes de firmar.",
+      retryQuote: "Actualizar cotización",
+      depositSuccess: "Liquidez agregada. Las participaciones del pool son un saldo distinto de tu PHASELQ.",
+      withdrawSuccess: "Participaciones canjeadas. Ambos activos vuelven en proporción al pool.",
+      swapSuccess: "Cambio enviado con tu mínimo a recibir garantizado.",
+      poolDisabled: "Los pools de liquidez están deshabilitados en este despliegue.",
+      soroswapNotConfigured: "El ruteo por Soroswap no está configurado en esta red.",
+      routerDrift: "El router de Soroswap cambió desde que se fijó. El ruteo queda en pausa hasta que un operador lo actualice.",
+      selfProvisionFlagged: "Este pool lo fondea y opera una sola billetera, así que su volumen queda excluido de los rankings.",
+      volumeExcluded: "El volumen marcado como wash queda excluido de todos los agregados.",
+      rollback: "Rollback: apagá phase-182 y reiniciá; los datos del pool quedan inertes.",
+    },
     integrations: {
       "actionFailed": "Falló la solicitud. Conservamos los datos; reintentá cuando puedas.",
       "actionConflict": "La solicitud está pendiente o cambió de estado. Actualizá el estado antes de reintentar.",

@@ -17,6 +17,13 @@ export function xbullRollbackNote(): string {
 }
 
 export const XBULL_ID = "xbull"
+
+/** Module-id matcher used by the wallet-kit dispatcher (spike 624). */
+export function isXBullModuleId(id: unknown): boolean {
+  if (typeof id !== "string") return false
+  const normalized = id.trim().toLowerCase().replace(/[^a-z]/g, "")
+  return normalized === "xbull" || normalized === "xbullwallet"
+}
 const LS_SELECTED_MODULE_ID = "@StellarWalletsKit/selectedModuleId"
 
 /**
@@ -29,6 +36,29 @@ export function isXBullSelected(): boolean {
 }
 
 // ── Freighter vs xBull Difference Matrix ─────────────────────────────────────
+
+export const XBULL_FREIGHTER_DIFFERENCE_MATRIX: Array<{ dimension: string; freighter: string; xbull: string }> = [
+  {
+    dimension: "Sign Result Shape",
+    freighter: "returns { signedTxXdr }",
+    xbull: "returns xdr/result or a raw string; normalize before submitting",
+  },
+  {
+    dimension: "Execution Model",
+    freighter: "browser extension injects window.freighterApi",
+    xbull: "wallet-kit module opens a popup or the mobile app",
+  },
+  {
+    dimension: "Error Format",
+    freighter: "throws Error with a plain message",
+    xbull: "rejects with a code/message object; map to XBullErrorMapped",
+  },
+  {
+    dimension: "Trustline Flow",
+    freighter: "changeTrust signed in-extension",
+    xbull: "changeTrust signed through the kit module; same XDR, different prompt",
+  },
+]
 
 export const FREIGHTER_XBULL_DIFFERENCE_MATRIX = {
   returnShape: {
@@ -61,9 +91,11 @@ export const FREIGHTER_XBULL_DIFFERENCE_MATRIX = {
 export function normalizeXBullSignResult(result: unknown): {
   signedTxXdr: string
   signedTransaction: string
+  error?: string
 } {
   if (!result) {
-    throw new Error("xBull returned empty signature result.")
+    recordSecurityCounter("xbull_error_mapped")
+    return { signedTxXdr: "", signedTransaction: "", error: "xBull returned empty signature result." }
   }
 
   // String result (raw XDR)
@@ -88,13 +120,31 @@ export function normalizeXBullSignResult(result: unknown): {
     }
   }
 
-  throw new Error("xBull signature result could not be normalized into transaction XDR.")
+  recordSecurityCounter("xbull_error_mapped")
+  return {
+    signedTxXdr: "",
+    signedTransaction: "",
+    error: "xBull signature result could not be normalized into transaction XDR.",
+  }
+}
+
+// Closed-label counter wrappers so call sites cannot invent label names.
+export function recordXBullSignRequested(): void {
+  recordSecurityCounter("xbull_sign_requested")
+}
+
+export function recordXBullSignSuccess(): void {
+  recordSecurityCounter("xbull_sign_success")
+}
+
+export function recordXBullTrustlineSigned(): void {
+  recordSecurityCounter("xbull_trustline_signed")
 }
 
 // ── Error Mapper ─────────────────────────────────────────────────────────────
 
 export type XBullErrorMapped = {
-  code: "REJECTED" | "NOT_INSTALLED" | "LOCKED" | "INVALID_NETWORK" | "POPUP_CLOSED" | "UNKNOWN"
+  code: "USER_REJECTED" | "NOT_INSTALLED" | "LOCKED" | "NETWORK_MISMATCH" | "POPUP_CLOSED" | "SIGN_FAILED"
   message: string
   retryable: boolean
   userAction: string
@@ -110,7 +160,7 @@ export function mapXBullError(err: unknown): XBullErrorMapped {
 
   if (/user_rejected|cancelled|cancelado|rejected|denied/i.test(lower)) {
     return {
-      code: "REJECTED",
+      code: "USER_REJECTED",
       message: "xBull: Transacción cancelada por el usuario. / Transaction rejected by user in xBull.",
       retryable: true,
       userAction: "Reintentá cuando estés listo para firmar en xBull.",
@@ -118,6 +168,7 @@ export function mapXBullError(err: unknown): XBullErrorMapped {
   }
 
   if (/extension not installed|not found|no provider/i.test(lower)) {
+    recordSecurityCounter("xbull_error_mapped")
     return {
       code: "NOT_INSTALLED",
       message: "xBull: Extensión no detectada en el navegador. / xBull extension not detected.",
@@ -127,6 +178,7 @@ export function mapXBullError(err: unknown): XBullErrorMapped {
   }
 
   if (/password rejected|locked|bloquead/i.test(lower)) {
+    recordSecurityCounter("xbull_error_mapped")
     return {
       code: "LOCKED",
       message: "xBull: La wallet está bloqueada o contraseña incorrecta. / xBull wallet is locked.",
@@ -135,9 +187,10 @@ export function mapXBullError(err: unknown): XBullErrorMapped {
     }
   }
 
-  if (/invalid network|network mismatch|wrong network/i.test(lower)) {
+  if (/invalid network|network (miss?match|not match)|wrong network/i.test(lower)) {
+    recordSecurityCounter("xbull_error_mapped")
     return {
-      code: "INVALID_NETWORK",
+      code: "NETWORK_MISMATCH",
       message: "xBull: Red incorrecta configurada en la wallet. / xBull network mismatch.",
       retryable: true,
       userAction: "Abrí xBull y cambiá a la red Stellar Testnet.",
@@ -145,6 +198,7 @@ export function mapXBullError(err: unknown): XBullErrorMapped {
   }
 
   if (/closed|blur|dismissed/i.test(lower)) {
+    recordSecurityCounter("xbull_error_mapped")
     return {
       code: "POPUP_CLOSED",
       message: "xBull: La ventana de firma se cerró antes de completar. / xBull popup closed.",
@@ -153,8 +207,9 @@ export function mapXBullError(err: unknown): XBullErrorMapped {
     }
   }
 
+  recordSecurityCounter("xbull_error_mapped")
   return {
-    code: "UNKNOWN",
+    code: "SIGN_FAILED",
     message: `xBull error: ${raw}`,
     retryable: true,
     userAction: "Revisá la extensión xBull y volvé a intentar.",

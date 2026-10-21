@@ -163,6 +163,8 @@ export async function POST(request: NextRequest) {
       const event = await recordWarehouseEvent({
         correlation_id: correlationId,
         ...eventPayload,
+        surface: typeof eventPayload.surface === "string" ? eventPayload.surface : "notifications",
+        stage: typeof eventPayload.stage === "string" ? eventPayload.stage : "client_event",
       })
       return NextResponse.json({ ok: true, event, feature_enabled: isAnalyticsWarehouseEnabled() })
     } catch (error) {

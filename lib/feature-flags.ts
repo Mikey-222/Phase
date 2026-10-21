@@ -1,3 +1,5 @@
+import { incSecurityCounter } from "@/lib/security-counters"
+
 /**
  * Feature flags — PHASE rolling delivery & runtime flag operations (Spike 607 / phase-174).
  *
@@ -90,19 +92,18 @@
  * - phase-179: data retention and GDPR erasure with TTL sweeps and wallet deletion (spike 617 / issue #480)
  * - phase-180: analytics warehouse export with Parquet and NDJSON, schema-versioned and redacted (spike 618 / issue #481)
  * - phase-181: anomaly detection on volume, counters and balances with webhook alert routing (spike 619 / issue #482)
+ * - phase-182: liquidity pools — classic PHASELQ/XLM pool + Soroswap router adapter, quotes,
+ *   deposits/withdrawals, and pool-aware wash screening (spike 574 / issue #438)
+ *
+ * phase-182 is default off. Rollback: unset the env keys and restart; the LP
+ * sidecar (`liquidity-pools.json`) and additive SQLite tables stay inert.
  */
 
 export type PhaseFeatureFlag =
-  | "phase-174"
-  | "phase-175"
-  | "phase-176"
-  | "phase-177"
-  | "phase-178"
-  | "phase-179"
-  | "phase-180"
-  | "phase-181"
-
-export type PhaseFeatureFlag =
+  | "phase-50"
+  | "phase-51"
+  | "phase-52"
+  | "phase-53"
   | "phase-50"
   | "phase-51"
   | "phase-52"
@@ -168,6 +169,7 @@ export type PhaseFeatureFlag =
   | "phase-144"
   | "phase-145"
   | "phase-154"
+  | "phase-156"
   | "phase-146"
   | "phase-147"
   | "phase-148"
@@ -193,14 +195,24 @@ export type PhaseFeatureFlag =
   | "phase-174"
   | "phase-175"
   | "phase-176"
-  | "phase-177";
+  | "phase-177"
   | "phase-170"
   | "phase-171"
   | "phase-172"
-  | "phase-173";
+  | "phase-173"
+  | "phase-178"
+  | "phase-179"
+  | "phase-180"
+  | "phase-181"
+  | "phase-182";
 
 
 const FLAG_ENV_MAP: Record<PhaseFeatureFlag, string[]> = {
+  "phase-50": ["NEXT_PUBLIC_FEATURE_PHASE_50", "FEATURE_PHASE_50"],
+  "phase-51": ["NEXT_PUBLIC_FEATURE_PHASE_51", "FEATURE_PHASE_51"],
+  "phase-52": ["NEXT_PUBLIC_FEATURE_PHASE_52", "FEATURE_PHASE_52"],
+  "phase-53": ["NEXT_PUBLIC_FEATURE_PHASE_53", "FEATURE_PHASE_53"],
+  "phase-156": ["NEXT_PUBLIC_FEATURE_PHASE_156", "FEATURE_PHASE_156"],
   "phase-174": ["NEXT_PUBLIC_FEATURE_PHASE_174", "FEATURE_PHASE_174"],
   "phase-175": ["NEXT_PUBLIC_FEATURE_PHASE_175", "FEATURE_PHASE_175"],
   "phase-176": ["NEXT_PUBLIC_FEATURE_PHASE_176", "FEATURE_PHASE_176"],
@@ -209,6 +221,7 @@ const FLAG_ENV_MAP: Record<PhaseFeatureFlag, string[]> = {
   "phase-179": ["NEXT_PUBLIC_FEATURE_PHASE_179", "FEATURE_PHASE_179"],
   "phase-180": ["NEXT_PUBLIC_FEATURE_PHASE_180", "FEATURE_PHASE_180"],
   "phase-181": ["NEXT_PUBLIC_FEATURE_PHASE_181", "FEATURE_PHASE_181"],
+  "phase-182": ["NEXT_PUBLIC_FEATURE_PHASE_182", "FEATURE_PHASE_182"],
   "phase-66": ["NEXT_PUBLIC_FEATURE_PHASE_66", "FEATURE_PHASE_66"],
   "phase-77": ["NEXT_PUBLIC_FEATURE_PHASE_77", "FEATURE_PHASE_77"],
   "phase-78": ["NEXT_PUBLIC_FEATURE_PHASE_78", "FEATURE_PHASE_78"],
@@ -292,10 +305,6 @@ const FLAG_ENV_MAP: Record<PhaseFeatureFlag, string[]> = {
   "phase-167": ["NEXT_PUBLIC_FEATURE_PHASE_167", "FEATURE_PHASE_167"],
   "phase-168": ["NEXT_PUBLIC_FEATURE_PHASE_168", "FEATURE_PHASE_168"],
   "phase-169": ["NEXT_PUBLIC_FEATURE_PHASE_169", "FEATURE_PHASE_169"],
-  "phase-174": ["NEXT_PUBLIC_FEATURE_PHASE_174", "FEATURE_PHASE_174"],
-  "phase-175": ["NEXT_PUBLIC_FEATURE_PHASE_175", "FEATURE_PHASE_175"],
-  "phase-176": ["NEXT_PUBLIC_FEATURE_PHASE_176", "FEATURE_PHASE_176"],
-  "phase-177": ["NEXT_PUBLIC_FEATURE_PHASE_177", "FEATURE_PHASE_177"],
   "phase-170": ["NEXT_PUBLIC_FEATURE_PHASE_170", "FEATURE_PHASE_170"],
   "phase-171": ["NEXT_PUBLIC_FEATURE_PHASE_171", "FEATURE_PHASE_171"],
   "phase-172": ["NEXT_PUBLIC_FEATURE_PHASE_172", "FEATURE_PHASE_172"],
@@ -389,6 +398,11 @@ export const ALL_FEATURE_FLAGS: readonly PhaseFeatureFlag[] = [
   "phase-175",
   "phase-176",
   "phase-177",
+  "phase-178",
+  "phase-179",
+  "phase-180",
+  "phase-181",
+  "phase-182",
 ] as const;
 
 function isTruthy(v: string | undefined): boolean {
@@ -399,34 +413,19 @@ function isTruthy(v: string | undefined): boolean {
   return s === "1" || s === "true" || s === "yes" || s === "on";
 }
 
-export function isFeatureEnabled(flag: PhaseFeatureFlag): boolean {
-  // Next.js only inlines public environment values accessed by literal key.
-  const newFlags: Partial<Record<PhaseFeatureFlag, string | undefined>> = {
-    "phase-174": process.env.NEXT_PUBLIC_FEATURE_PHASE_174,
-    "phase-175": process.env.NEXT_PUBLIC_FEATURE_PHASE_175,
-    "phase-176": process.env.NEXT_PUBLIC_FEATURE_PHASE_176,
-    "phase-177": process.env.NEXT_PUBLIC_FEATURE_PHASE_177,
-    "phase-178": process.env.NEXT_PUBLIC_FEATURE_PHASE_178,
-    "phase-179": process.env.NEXT_PUBLIC_FEATURE_PHASE_179,
-    "phase-180": process.env.NEXT_PUBLIC_FEATURE_PHASE_180,
-    "phase-181": process.env.NEXT_PUBLIC_FEATURE_PHASE_181,
-  };
-  if (isTruthy(newFlags[flag])) return true;
-  // Public keys are checked first so the same helper works in browser and server code.
-  const keys = FLAG_ENV_MAP[flag] ?? [
-    `NEXT_PUBLIC_FEATURE_${flag.replace(/-/g, "_").toUpperCase()}`,
-    `FEATURE_${flag.replace(/-/g, "_").toUpperCase()}`,
-  ];
-  // Unknown flags still receive a predictable convention-based fallback.
-  for (const k of keys) {
-    // Reading process.env defensively keeps this module safe during client bundling.
-    const v =
-      typeof process !== "undefined"
-        ? (process.env as Record<string, string | undefined>)[k]
-        : undefined;
-    if (isTruthy(v)) return true;
-  }
-  return false;
+/**
+ * Returns whether a flag is on for the given context.
+ *
+ * With `phase-174` off (default) this is a pure static env read, identical to
+ * the pre-flag-ops behavior. With flag ops on, runtime rules (kill-switch,
+ * targeting, rollout) take precedence over the build-time environment.
+ */
+export function isFeatureEnabled(
+  flag: PhaseFeatureFlag,
+  context: FeatureFlagEvalContext = {},
+): boolean {
+  if (!isFeatureFlagOpsEnabled()) return envFlagEnabled(flag)
+  return evaluateFeatureFlag(flag, context).enabled
 }
 
 export function featureFlagEnvKeys(flag: PhaseFeatureFlag): string[] {
@@ -527,10 +526,15 @@ export function getEnabledFeatureFlags(): PhaseFeatureFlag[] {
     "phase-171",
     "phase-172",
     "phase-173",
+    "phase-178",
+    "phase-179",
+    "phase-180",
+    "phase-181",
+    "phase-182",
   ];
 
   // Filtering is evaluated at call time, allowing runtime test overrides.
-  return all.filter(isFeatureEnabled)
+  return all.filter((flag) => isFeatureEnabled(flag))
 }
 
 export function flagRollbackNote(flag: PhaseFeatureFlag): string {
@@ -538,6 +542,202 @@ export function flagRollbackNote(flag: PhaseFeatureFlag): string {
   // Returning a plain sentence keeps the note suitable for logs and admin screens.
   const keys = featureFlagEnvKeys(flag).join(" / ");
   return `Rollback ${flag}: unset ${keys} or set to 0/false and restart (or activate kill-switch via phase-174). No data migration to revert.`;
+}
+
+// ─── phase-174: runtime flag operations ────────────────────────────────────
+// Restored after a merge dropped the definitions referenced by the admin route,
+// the kill-switch drill and `lib/__tests__/feature-flag-ops.test.ts`.
+
+export type FeatureFlagEvalContext = {
+  /** Wallet used for allow/deny targeting and deterministic rollout bucketing. */
+  wallet?: string | null
+  /** Ignore `NEXT_PUBLIC_*` build-time exposure (server write-path checks). */
+  runtimeOnly?: boolean
+}
+
+export type FeatureFlagRule = {
+  flag: PhaseFeatureFlag
+  killSwitch: boolean
+  overrideEnabled: boolean | null
+  rolloutBps: number | null
+  allowWallets: string[]
+  denyWallets: string[]
+  updatedBy: string
+  reason: string
+  updatedAt: number
+  version: number
+}
+
+export type FeatureFlagOpsCacheState = "off" | "fresh" | "stale"
+
+export type FeatureFlagEvalReason =
+  | "kill_switch"
+  | "wallet_denied"
+  | "wallet_allowed"
+  | "wallet_not_targeted"
+  | "override_enabled"
+  | "override_disabled"
+  | "rollout"
+  | "env_public"
+  | "env_server"
+  | "not_enabled"
+
+export type FeatureFlagEval = {
+  flag: PhaseFeatureFlag
+  enabled: boolean
+  reason: FeatureFlagEvalReason
+  cacheState: FeatureFlagOpsCacheState
+  clientBundled: boolean
+  serverConfigured: boolean
+  wallet: string | null
+  ruleVersion: number | null
+}
+
+export class FeatureFlagOpsError extends Error {
+  readonly code: "INVALID_FLAG" | "VALIDATION_FAILED" | "VERSION_CONFLICT" | "FLAG_DISABLED" | "NOT_FOUND"
+  readonly details?: unknown
+  constructor(
+    code: FeatureFlagOpsError["code"],
+    message: string,
+    details?: unknown,
+  ) {
+    super(message)
+    this.name = "FeatureFlagOpsError"
+    this.code = code
+    this.details = details
+  }
+}
+
+const ruleCache = new Map<PhaseFeatureFlag, FeatureFlagRule>()
+let cacheLoadedAt = 0
+let cacheDegradedStale = false
+const drillHistory: KillSwitchDrillReport[] = []
+
+function readEnvVar(name: string): string | undefined {
+  if (typeof process === "undefined" || !process.env) return undefined
+  return (process.env as Record<string, string | undefined>)[name]
+}
+
+/** Static env-only evaluation, used when flag ops are disabled (default). */
+function envFlagState(flag: PhaseFeatureFlag): {
+  clientBundled: boolean
+  serverConfigured: boolean
+} {
+  // Literal property reads keep Next.js able to inline NEXT_PUBLIC values.
+  const bundledLiterals: Partial<Record<PhaseFeatureFlag, string | undefined>> = {
+    "phase-174": process.env.NEXT_PUBLIC_FEATURE_PHASE_174,
+    "phase-175": process.env.NEXT_PUBLIC_FEATURE_PHASE_175,
+    "phase-176": process.env.NEXT_PUBLIC_FEATURE_PHASE_176,
+    "phase-177": process.env.NEXT_PUBLIC_FEATURE_PHASE_177,
+    "phase-178": process.env.NEXT_PUBLIC_FEATURE_PHASE_178,
+    "phase-179": process.env.NEXT_PUBLIC_FEATURE_PHASE_179,
+    "phase-180": process.env.NEXT_PUBLIC_FEATURE_PHASE_180,
+    "phase-181": process.env.NEXT_PUBLIC_FEATURE_PHASE_181,
+    "phase-182": process.env.NEXT_PUBLIC_FEATURE_PHASE_182,
+  }
+  const keys = FLAG_ENV_MAP[flag] ?? [
+    `NEXT_PUBLIC_FEATURE_${flag.replace(/-/g, "_").toUpperCase()}`,
+    `FEATURE_${flag.replace(/-/g, "_").toUpperCase()}`,
+  ]
+  const clientKey = keys.find((k) => k.startsWith("NEXT_PUBLIC_"))
+  const serverKey = keys.find((k) => k.startsWith("FEATURE_"))
+  const clientBundled =
+    isTruthy(bundledLiterals[flag]) ||
+    (clientKey ? isTruthy(readEnvVar(clientKey)) : false)
+  const serverConfigured = serverKey ? isTruthy(readEnvVar(serverKey)) : false
+  return { clientBundled, serverConfigured }
+}
+
+function envFlagEnabled(flag: PhaseFeatureFlag): boolean {
+  const state = envFlagState(flag)
+  return state.clientBundled || state.serverConfigured
+}
+
+export function featureFlagOpsCacheState(): FeatureFlagOpsCacheState {
+  if (cacheDegradedStale) return "stale"
+  if (cacheLoadedAt > 0 || ruleCache.size > 0) return "fresh"
+  return "off"
+}
+
+export function isFeatureFlagOpsEnabled(): boolean {
+  return envFlagEnabled("phase-174")
+}
+
+/** 32-bit FNV-1a over `flag|wallet`, modulo 10_000 (monotonic as rolloutBps rises). */
+export function flagRolloutBucket(flag: PhaseFeatureFlag, wallet: string): number {
+  const input = `${flag}|${(wallet ?? "").trim().toUpperCase()}`
+  let hash = 0x811c9dc5
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash % 10_000
+}
+
+function killSwitchEnvFlags(): string[] {
+  const raw = readEnvVar("PHASE_KILL_SWITCH_FLAGS") ?? ""
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+/**
+ * Evaluates a flag with strict precedence: env kill-switch -> rule kill-switch ->
+ * denyWallets -> allowWallets -> overrideEnabled -> rolloutBps -> static env.
+ */
+export function evaluateFeatureFlag(
+  flag: PhaseFeatureFlag,
+  context: FeatureFlagEvalContext = {},
+): FeatureFlagEval {
+  const wallet = context.wallet?.trim().toUpperCase() || null
+  const rule = isFeatureFlagOpsEnabled() ? (ruleCache.get(flag) ?? null) : null
+  const state = envFlagState(flag)
+  const base = {
+    flag,
+    cacheState: featureFlagOpsCacheState(),
+    clientBundled: state.clientBundled,
+    serverConfigured: state.serverConfigured,
+    wallet,
+    ruleVersion: rule?.version ?? null,
+  }
+
+  if (killSwitchEnvFlags().includes(flag.toLowerCase())) {
+    return { ...base, enabled: false, reason: "kill_switch" }
+  }
+  if (rule?.killSwitch) {
+    return { ...base, enabled: false, reason: "kill_switch" }
+  }
+  if (wallet && rule) {
+    if (rule.denyWallets.includes(wallet)) {
+      return { ...base, enabled: false, reason: "wallet_denied" }
+    }
+    if (rule.allowWallets.length > 0) {
+      return rule.allowWallets.includes(wallet)
+        ? { ...base, enabled: true, reason: "wallet_allowed" }
+        : { ...base, enabled: false, reason: "wallet_not_targeted" }
+    }
+  }
+  if (rule && !wallet && rule.allowWallets.length > 0) {
+    return { ...base, enabled: false, reason: "wallet_not_targeted" }
+  }
+  if (rule?.overrideEnabled !== null && rule?.overrideEnabled !== undefined) {
+    return rule.overrideEnabled
+      ? { ...base, enabled: true, reason: "override_enabled" }
+      : { ...base, enabled: false, reason: "override_disabled" }
+  }
+  if (rule?.rolloutBps !== null && rule?.rolloutBps !== undefined && wallet) {
+    return flagRolloutBucket(flag, wallet) < rule.rolloutBps
+      ? { ...base, enabled: true, reason: "rollout" }
+      : { ...base, enabled: false, reason: "rollout" }
+  }
+  if (!context.runtimeOnly && state.clientBundled) {
+    return { ...base, enabled: true, reason: "env_public" }
+  }
+  if (state.serverConfigured) {
+    return { ...base, enabled: true, reason: "env_server" }
+  }
+  return { ...base, enabled: false, reason: "not_enabled" }
 }
 
 export type SetFeatureFlagRuleInput = {
@@ -568,6 +768,13 @@ function normalizeWalletList(wallets: string[] | undefined): string[] {
  * Throws `FeatureFlagOpsError("VERSION_CONFLICT")` (HTTP 409) when `expectedVersion`
  * does not match the current rule version.
  */
+export function isValidPhaseFeatureFlag(value: unknown): value is PhaseFeatureFlag {
+  return (
+    typeof value === "string" &&
+    (ALL_FEATURE_FLAGS as readonly string[]).includes(value)
+  )
+}
+
 export function setFeatureFlagRule(
   input: SetFeatureFlagRuleInput,
 ): FeatureFlagRule {
@@ -758,6 +965,19 @@ export function resolvePendingClaimAfterFlagFlip(params: {
  * 3. Verifies `faucetPending` mid-poll hash & amountStroops survive a `phase-131` kill-switch flip
  * 4. Verifies stale-on-error cache fallback preserves an active kill-switch when store read fails
  */
+export type KillSwitchDrillReport = {
+  drillId: string
+  executedAt: number
+  passed: boolean
+  steps: {
+    killOverridesBuildEnv: boolean
+    monotonicRolloutRamp: boolean
+    faucetPendingMidPollIdempotent: boolean
+    staleCachePreservesKillSwitch: boolean
+  }
+  notes: string[]
+}
+
 export async function runKillSwitchDrill(): Promise<KillSwitchDrillReport> {
   const savedRules = exportFeatureFlagRulesSnapshot();
   const savedLoadedAt = cacheLoadedAt;

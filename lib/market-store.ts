@@ -274,6 +274,58 @@ export function phaseCollabSplitsRollbackNote(): string { return flagRollbackNot
 export function phaseTimedDropsRollbackNote(): string { return flagRollbackNote('phase-timed-drops'); }
 export function phaseDutchAuctionRollbackNote(): string { return flagRollbackNote('phase-dutch-auction'); }
 
+// ── Spike 574 (issue #438, phase-182): pool-denominated price reference ──
+// Listings are priced in PHASELQ. Displaying an XLM equivalent needs the pool's
+// spot AND the execution price for a specific size: a thin testnet pool moves
+// double digits, so a spot-only number is misleading. This is read-only; the
+// write path (offers) never blocks on a pool outage.
+export function isPhase182Enabled(wallet?: string): boolean {
+  return isFeatureEnabled('phase-182', wallet ? { wallet } : undefined);
+}
+
+export function phase182RollbackNote(): string {
+  return flagRollbackNote('phase-182');
+}
+
+export type PoolDenominatedPrice = {
+  price_phaselq: number
+  amount_phaselq: number
+  amount_xlm_spot: number
+  amount_xlm_execution: number
+  spot_price_xlm: number
+  execution_price_xlm: number
+  price_impact_bps: number
+  quote_hash: string
+  /** True when the quote came from a cached reserve snapshot after an outage. */
+  stale: boolean
+}
+
+/** Convert a PHASELQ-denominated listing (or offer) into both XLM readings. */
+export function denoteListingInPool(
+  pricePhaselq: number,
+  quote: {
+    spotPrice: number
+    executionPrice: number
+    priceImpactBps: number
+    amountInStroops: bigint
+    quoteHash: string
+    stale: boolean
+  },
+  amountPhaselq: number = pricePhaselq,
+): PoolDenominatedPrice {
+  return {
+    price_phaselq: pricePhaselq,
+    amount_phaselq: amountPhaselq,
+    amount_xlm_spot: amountPhaselq * quote.spotPrice,
+    amount_xlm_execution: amountPhaselq * quote.executionPrice,
+    spot_price_xlm: quote.spotPrice,
+    execution_price_xlm: quote.executionPrice,
+    price_impact_bps: quote.priceImpactBps,
+    quote_hash: quote.quoteHash,
+    stale: quote.stale,
+  }
+}
+
 /** Spike 673: 'Edition X/Y' label, or 'Artist Proof' for AP holds. Pure. */
 export function editionBadge(listing: Pick<Listing, 'edition_number' | 'edition_size' | 'is_artist_proof'>): string | null {
   if (listing.is_artist_proof) return 'Artist Proof';
