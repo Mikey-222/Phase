@@ -1,4 +1,4 @@
-﻿// @ts-nocheck
+// @ts-nocheck
 /**
  * Community-signal proof of wallet ownership (SEP-53 Ed25519 message signing).
  *
@@ -154,13 +154,13 @@ export async function signSignalPayload(
 }
 
 
-/**
+/*
  * Firma corta derivada del visor (wallet u otro id) — cambia por sesión/dirección; no es criptografía fuerte.
- * Restored from f9a08b6: 7cc03e4 removed it while fusion-chamber, phase-artifact-visualizer and
- * phase-protected-preview still import it for the visual watermark.
+ * Kept (7cc03e4) because fusion-chamber, phase-artifact-visualizer and phase-protected-preview
+ * still import it for the visual watermark.
  */
-export function viewerSignatureShort(address: string | null | undefined): string {
-  const s = (address ?? "ANON_VIEWER").trim()
+export function viewerSignatureShortWatermark(addressOrWallet: string | null | undefined): string {
+  const s = (addressOrWallet ?? "ANON_VIEWER").trim()
   let h = 2166136261
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i)

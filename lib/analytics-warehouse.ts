@@ -21,6 +21,7 @@
  * reversing; the Parquet/NDJSON helpers stay importable for tests.
  */
 
+import { createHash } from "node:crypto"
 import { parquetWriteBuffer } from "hyparquet-writer"
 import { isFeatureEnabled } from "@/lib/feature-flags"
 import { computeSha256 } from "@/lib/data-portability"
@@ -46,6 +47,113 @@ export type WarehouseRow = {
 
 export function isWarehouseExportEnabled(): boolean {
   return isFeatureEnabled("phase-180")
+}
+
+// ── phase-176 (spike 610): unified event recording ─────────────────────────
+// Restored after a merge left the callers (faucet, notifications, forge,
+// achievements) importing functions this module no longer exported. The event
+// table is the one `lib/funnel-retention.ts` already queries.
+
+export function isAnalyticsWarehouseEnabled(wallet?: string): boolean {
+  return isFeatureEnabled("phase-176", wallet ? { wallet } : undefined)
+}
+
+export type WarehouseEventInput = {
+  surface: string
+  stage: string
+  wallet?: string | null
+  sessionId?: string | null
+  session_id?: string | null
+  reason?: string | null
+  correlation_id?: string | null
+  metadata?: Record<string, unknown>
+  now?: number
+  /** Forward-compatible: event payloads may add fields without a type break. */
+  [key: string]: unknown
+}
+
+export function ensureAnalyticsEventTable(): void {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS analytics_events (
+      event_id   TEXT PRIMARY KEY,
+      surface    TEXT NOT NULL,
+      stage      TEXT NOT NULL,
+      wallet     TEXT,
+      session_id TEXT,
+      metadata   TEXT,
+      ts         INTEGER NOT NULL
+    )
+  `)
+  getDb().exec("CREATE INDEX IF NOT EXISTS idx_analytics_events_surface_ts ON analytics_events (surface, ts)")
+  getDb().exec("CREATE INDEX IF NOT EXISTS idx_analytics_events_wallet_ts ON analytics_events (wallet, ts)")
+}
+
+/**
+ * Append one event. Metadata is JSON-encoded but never used as a counter label;
+ * the closed-label rule applies to security counters, not to this row store.
+ */
+export async function recordWarehouseEvent(
+  input: WarehouseEventInput,
+): Promise<{ ok: boolean; skipped?: boolean }> {
+  if (!isAnalyticsWarehouseEnabled(input.wallet ?? undefined)) return { ok: true, skipped: true }
+  const now = input.now ?? Date.now()
+  const eventId = createHash("sha256")
+    .update(`${input.surface}|${input.stage}|${input.wallet ?? ""}|${now}|${Math.random()}`)
+    .digest("hex")
+  ensureAnalyticsEventTable()
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO analytics_events
+        (event_id, surface, stage, wallet, session_id, metadata, ts)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      eventId,
+      input.surface,
+      input.stage,
+      input.wallet ?? null,
+      input.sessionId ?? null,
+      input.metadata ? JSON.stringify(input.metadata) : null,
+      now,
+    )
+  return { ok: true }
+}
+
+/** Stage counts for one surface over a window (read-only operator view). */
+export async function getUnifiedFunnelAnalytics(opts: {
+  surface: string
+  windowMs?: number
+  now?: number
+}): Promise<{
+  surface: string
+  window_ms: number
+  total: number
+  unique_subjects: number
+  stages: Array<{ stage: string; count: number }>
+}> {
+  ensureAnalyticsEventTable()
+  const now = opts.now ?? Date.now()
+  const windowMs = opts.windowMs ?? 24 * 60 * 60 * 1000
+  const rows = getDb()
+    .prepare(
+      `SELECT stage, COUNT(*) AS count FROM analytics_events
+        WHERE surface = ? AND ts >= ? GROUP BY stage ORDER BY count DESC`,
+    )
+    .all(opts.surface, now - windowMs) as Array<{ stage: string; count: number }>
+  const subjects = getDb()
+    .prepare(
+      `SELECT COUNT(DISTINCT COALESCE(wallet, session_id)) AS n FROM analytics_events
+        WHERE surface = ? AND ts >= ?`,
+    )
+    .get(opts.surface, now - windowMs) as { n?: number }
+  const stages = rows.map((r) => ({ stage: r.stage, count: Number(r.count) }))
+  return {
+    surface: opts.surface,
+    window_ms: windowMs,
+    total: stages.reduce((sum, s) => sum + s.count, 0),
+    unique_subjects: Number(subjects?.n ?? 0),
+    stages,
+  }
 }
 
 export function warehouse180RollbackNote(): string {

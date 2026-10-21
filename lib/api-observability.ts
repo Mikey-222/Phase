@@ -3,6 +3,7 @@ import { isFeatureEnabled } from "@/lib/feature-flags"
 import { randomUUID } from "node:crypto"
 import { NextRequest, NextResponse } from "next/server"
 import { emitLog } from "@/lib/log-pipeline"
+import { isAnalyticsWarehouseEnabled, recordWarehouseEvent } from "@/lib/analytics-warehouse"
 
 type ApiLogLevel = "info" | "warn" | "error"
 type ApiMetadata = Record<string, unknown>
@@ -10,6 +11,28 @@ type ApiMetadata = Record<string, unknown>
 type ApiJsonInit = ResponseInit & {
   event?: string
   metadata?: ApiMetadata
+}
+
+/** Bound metadata so an event cannot grow unbounded labels or leak long text. */
+function sanitizeAnalyticsMetadata(metadata: ApiMetadata | undefined): ApiMetadata {
+  const out: ApiMetadata = {}
+  if (!metadata || typeof metadata !== "object") return out
+  let count = 0
+  for (const [key, value] of Object.entries(metadata)) {
+    if (count >= 24) break
+    if (typeof key !== "string" || key.length > 64) continue
+    if (typeof value === "string") {
+      out[key] = value.slice(0, 200)
+    } else if (typeof value === "number" && Number.isFinite(value)) {
+      out[key] = value
+    } else if (typeof value === "boolean") {
+      out[key] = value
+    } else {
+      continue
+    }
+    count++
+  }
+  return out
 }
 
 const CORRELATION_HEADER = "x-correlation-id"

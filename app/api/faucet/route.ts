@@ -90,7 +90,7 @@ type WalletClaims = {
   dailyAt?: number
   quests?: Record<string, number>
   /** Mint ya enviado; reutilizamos el hash para seguir el poll sin reenviar (serverless timeout). */
-  faucetPending?: { hash: string; reward: RewardType; at: number; amountStroops?: string }
+  faucetPending?: { hash: string; reward: RewardType; at: number; amountStroops?: string; tokenContract?: string }
 }
 
 type FaucetClaims = Record<string, WalletClaims>
@@ -171,6 +171,7 @@ async function readClaims(): Promise<FaucetClaims> {
           reward: r,
           at: fp.at,
           ...(typeof fp.amountStroops === "string" ? { amountStroops: fp.amountStroops } : {}),
+          ...(typeof fp.tokenContract === "string" ? { tokenContract: fp.tokenContract } : {}),
         }
       }
       normalized[wallet] = {
@@ -179,11 +180,11 @@ async function readClaims(): Promise<FaucetClaims> {
         quests: value.quests && typeof value.quests === "object" ? value.quests : {},
         faucetPending,
       }
-      return normalized
-    } catch {
-      return {}
     }
-  })
+    return normalized
+  } catch {
+    return {}
+  }
 }
 
 /**

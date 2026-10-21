@@ -49,10 +49,10 @@ export async function POST(request: NextRequest) {
     const payload = decodeX402Token(token)
     // Spike 612: variant-aware floor when the caller supplies the payer; control otherwise.
     const requiredStroops = (await resolveForgeRequiredAmountStroops(body.user_address?.trim())).amountStroops
-    const verified = isMaisonedPayment(payload, requiredStroops)
+    const verifiedAtRequiredFloor = isMaisonedPayment(payload, requiredStroops)
     const block = await complianceGate(body.user_address ?? "", String(payload?.amount ?? ""), "x402")
     if (block) return block
-    const verified = isMaisonedPayment(payload)
+    const verified = verifiedAtRequiredFloor && isMaisonedPayment(payload)
 
     if (verified && typeof payload?.invoice === 'string') {
       const used = await isSettlementUsed(payload.invoice)

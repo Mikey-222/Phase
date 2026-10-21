@@ -16,10 +16,8 @@
 import { readJsonFile } from "@/lib/json-store"
 import { serverDataJsonPath } from "@/lib/server-data-paths"
 import { getDb } from "@/lib/sqlite-db"
-import {
-  isFunnelRetentionEnabled,
-  phase177RollbackNote,
-} from "@/lib/feature-flags"
+import { ensureAnalyticsEventTable } from "@/lib/analytics-warehouse"
+import { isFeatureEnabled, phase177RollbackNote } from "@/lib/feature-flags"
 import {
   type WalletAgeBand,
   getWalletAgeBandCached,
@@ -122,6 +120,10 @@ function calculatePercentiles(values: number[]): {
  * Computes Funnel Analytics v2 with retention cohorts, time-to-convert tracking,
  * wallet-age bands, and sybil-weighted cohort retention.
  */
+export function isFunnelRetentionEnabled(wallet?: string): boolean {
+  return isFeatureEnabled("phase-177", wallet ? { wallet } : undefined)
+}
+
 export async function computeFunnelRetention(opts: {
   windowMs?: number
   now?: number
@@ -143,7 +145,9 @@ export async function computeFunnelRetention(opts: {
     readReferralStore(),
   ])
 
-  // 2. Query events from SQLite analytics_events (if available)
+  // 2. Query events from SQLite analytics_events. Ensure the table exists so a
+  // fresh install returns zeros instead of throwing "no such table".
+  ensureAnalyticsEventTable()
   const db = getDb()
   const rows = db
     .prepare(

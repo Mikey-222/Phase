@@ -6,6 +6,7 @@
 import { StrKey } from "@stellar/stellar-sdk"
 import { z } from "zod"
 import { checkPreviewIsolation } from "@/lib/preview-isolation"
+import { auditFeatureFlagOpsWiring, isFeatureEnabled } from "@/lib/feature-flags"
 import { incSecurityCounter } from "@/lib/security-counters"
 
 export type EnvValidationError = {
